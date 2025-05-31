@@ -1,3 +1,7 @@
+import torch.multiprocessing
+torch.multiprocessing.set_start_method('spawn', force=True)
+
+import os
 import argparse
 import copy
 import json
@@ -403,7 +407,8 @@ def main():
         batch_size=args.batch_size,
         sampler=train_sampler,
         shuffle=(train_sampler is None),
-        num_workers=4,
+        num_workers=min(4, os.cpu_count() // 2),
+        persistent_workers=True,
         pin_memory=True,
         collate_fn=collate_fn
     )

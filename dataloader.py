@@ -129,7 +129,7 @@ class AudioDataset(Dataset):
     ) -> torch.Tensor:
         # Handle precomputed features
         if audio_path.endswith('.pt'):
-            mel = torch.load(audio_path).to(device)
+            mel = torch.load(audio_path)
         else:
             mel = log_mel_spectrogram(audio_path, n_mels=128)
             
@@ -139,9 +139,7 @@ class AudioDataset(Dataset):
         # Dynamic padding to max length
         max_len = max(mel.shape[1], N_FRAMES)
         mel = pad_or_trim(mel, max_len)
-        
-        if self.fp16:
-            mel = mel.half()
+
         return mel
 
     def _construct_decoder_output(
@@ -187,7 +185,9 @@ class AudioDataset(Dataset):
 
         decoder_output = self._construct_decoder_output(prompt_tokens, special_tokens, text_tokens)
         mel = self._calculate_mel(record.audio_path, next_partial_segment_start, no_timestamps)
-
+        if self.fp16 and torch.cuda.is_available():
+            mel = mel.half()
+        
         return (
             mel,
             torch.tensor(decoder_input, dtype=torch.long),

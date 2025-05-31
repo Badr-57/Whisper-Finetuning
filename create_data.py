@@ -484,9 +484,8 @@ class DataProcessor:
             return None
             
         try:
-            # GPU-accelerated spectrogram
             segment_audio_np = segment_audio.cpu().numpy().astype(np.float32)
-            mel = log_mel_spectrogram(segment_audio_np, n_mels=128, padding=N_FRAMES if segment_audio_np.size > 0 else 0).to(device)
+            mel = log_mel_spectrogram(segment_audio_np, n_mels=128, padding=N_FRAMES if segment_audio_np.size > 0 else 0)
             
             # Dynamic padding
             if mel.shape[1] < N_FRAMES:
