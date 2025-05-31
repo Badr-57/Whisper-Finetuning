@@ -1,5 +1,3 @@
-Here's a comprehensive updated `README.md` with beginner-friendly walkthroughs and code snippets:
-
 ```markdown
 # Whisper Fine-Tuning Toolkit (V3 Turbo Support) 🚀
 
