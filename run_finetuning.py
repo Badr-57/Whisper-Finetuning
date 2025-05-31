@@ -19,7 +19,8 @@ from transformers import get_linear_schedule_with_warmup
 from whisper import Whisper
 from whisper.tokenizer import get_tokenizer
 
-from dataloader import get_dataset  # Changed from get_dataloader
+from dataloader import get_dataset, collate_fn
+#from evaluate import ModelEvaluator
 
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fine-tune a Whisper model for ASR")
@@ -49,6 +50,9 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument("--use-amp", action="store_true", help="Use Automatic Mixed Precision")
     parser.add_argument("--gradient-checkpointing", action="store_true", help="Enable gradient checkpointing")
     parser.add_argument("--continue-from", type=str, default=None, help="Path to checkpoint to continue training")
+
+    parser.add_argument("--eval-datasets", nargs="+", default=["common_voice", "fleurs", "controlled_no_diacritics",         "controlled_with_diacritics"], help="Datasets to evaluate on")
+    parser.add_argument("--eval-interval", type=int, default=1, help="Evaluate every N epochs")
     
     # Distributed training arguments
     parser.add_argument("--gpus", type=int, default=1, help="Number of GPUs to use (0 for CPU)")
@@ -194,10 +198,18 @@ def main_loop(
     start_step: int = 0,
     is_main_process: bool = True
 ) -> None:
+
+    # Force 128 mel bins to prioritize v3 models
+    model.dims.n_mels = 128
+    model.encoder.conv1 = nn.Conv1d(128, model.dims.n_audio_state, kernel_size=3, padding=1)
+
     # Only main process handles evaluation
     if is_main_process:
         min_loss = evaluate(model, dev_loader, args.use_amp)
         print(f"Initial loss: {min_loss:.4f}")
+        
+        # Initialize evaluator for external datasets
+        evaluator = ModelEvaluator(device=args.device, batch_size=args.dev_batch_size)
     else:
         min_loss = float('inf')
     
@@ -231,9 +243,33 @@ def main_loop(
             pbar.set_postfix({"loss": f"{train_loss:.4f}", "lr": f"{current_lr:.2e}"})
         
         if step % args.eval_steps == 0 and is_main_process:
+            # Calculate epoch number
+            epoch = step // (len(train_loader) // args.accum_grad_steps)
+            
+            # Standard validation loss
             eval_loss = evaluate(model, dev_loader, args.use_amp)
             tqdm.write(f"Step {step}: validation loss={eval_loss:.4f}")
             
+            # External dataset evaluation
+            if epoch % args.eval_interval == 0:
+                tqdm.write(f"Evaluating on external datasets at epoch {epoch}...")
+                results = evaluator.evaluate_model(
+                    model.module if isinstance(model, nn.parallel.DistributedDataParallel) else model,
+                    model_id=f"step_{step}",
+                    datasets=args.eval_datasets
+                )
+                
+                tqdm.write(f"\nEpoch {epoch} Metrics:")
+                for dataset_id, metrics in results.items():
+                    tqdm.write(f"  {metrics['name']}:")
+                    tqdm.write(f"    WER: {metrics['WER']:.2%}")
+                    tqdm.write(f"    CER: {metrics['CER']:.2%}")
+                
+                # Save metrics to file
+                with open(f"{args.save_dir}/metrics_epoch_{epoch}.json", "w") as f:
+                    json.dump(results, f, indent=2)
+            
+            # Model saving
             if eval_loss < min_loss:
                 min_loss = eval_loss
                 save_model(
