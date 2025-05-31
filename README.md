@@ -234,11 +234,7 @@ ffmpeg -i video.mp4 -ar 16000 -ac 1 audio.wav
 4. **Regular Validation** - Evaluate every 500 steps
 5. **Normalize Transcripts** - Use `--normalize-unicode` in create_data.py
 
-## Contributors 👏
-[![Contributors](https://contrib.rocks/image?repo=your-repo/whisper-finetuning)](https://github.com/your-repo/whisper-finetuning/graphs/contributors)
-
-*Apache 2.0 License | Documentation updated 2023-12-01*
-```
+*MIT License
 
 ## Beginner-Friendly Walkthrough 🐣
 
