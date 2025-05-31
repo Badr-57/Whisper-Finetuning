@@ -354,7 +354,8 @@ class DataProcessor:
     def _create_records_with_timestamps(
         self, utterances: List[Utterance], audio_path: Path
     ) -> List[Record]:
-        audio = torch.tensor(load_audio(audio_path))
+        with torch.inference_mode():
+            audio = torch.tensor(load_audio(audio_path))
         dump_dir = Path(self.dump_dir) / audio_path.stem
         dump_dir.mkdir(parents=True, exist_ok=True)
         records = []
@@ -557,7 +558,7 @@ class DataProcessor:
                 f"{format_timestamp((segment_start + DURATION) / 1000)}) of {audio_path}"
             )
 
-        time_in_segment = time - segment_start
+        time_in_segment = max(0, min(DURATION, time - segment_start))
         nearest_timestamp = round(time_in_segment / self.timestamp_resolution) * self.timestamp_resolution
         return f"<|{nearest_timestamp / 1000:.2f}|>"
 

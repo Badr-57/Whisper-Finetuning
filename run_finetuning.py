@@ -22,6 +22,8 @@ from whisper.tokenizer import get_tokenizer
 from dataloader import get_dataset, collate_fn
 #from evaluate import ModelEvaluator
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fine-tune a Whisper model for ASR")
     # Dataloader arguments
@@ -92,7 +94,7 @@ def train_step(
                           y_in.to(model.device, non_blocking=True), \
                           y_out.to(model.device, non_blocking=True)
 
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.cuda.amp.autocast(enabled=use_amp and torch.cuda.is_available()):
             if train_only_decoder:
                 with torch.no_grad():
                     audio_features = model.embed_audio(x)
@@ -134,7 +136,7 @@ def evaluate(model: Whisper, dev_loader: DataLoader, use_amp: bool) -> float:
     for x, y_in, y_out in tqdm(dev_loader):
         x, y_in, y_out = x.to(model.device), y_in.to(model.device), y_out.to(model.device)
         
-        with torch.cuda.amp.autocast(enabled=use_amp):
+        with torch.cuda.amp.autocast(enabled=use_amp and torch.cuda.is_available()):
             logits = model(x, y_in)
             loss = F.cross_entropy(logits.transpose(1, 2), y_out)
             

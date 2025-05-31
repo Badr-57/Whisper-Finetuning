@@ -11,6 +11,8 @@ from tqdm import tqdm
 
 from create_data import DataProcessor, Record
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def collate_fn(data):
     x, y_in, y_out = zip(*data)
     
@@ -127,7 +129,7 @@ class AudioDataset(Dataset):
     ) -> torch.Tensor:
         # Handle precomputed features
         if audio_path.endswith('.pt'):
-            mel = torch.load(audio_path)
+            mel = torch.load(audio_path).to(device)
         else:
             mel = log_mel_spectrogram(audio_path, n_mels=128)
             
