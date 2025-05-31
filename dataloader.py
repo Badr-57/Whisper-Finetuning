@@ -3,12 +3,42 @@ from typing import List, Optional, Tuple
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from whisper.audio import CHUNK_LENGTH, N_FRAMES, log_mel_spectrogram, pad_or_trim
 from whisper.tokenizer import Tokenizer
 from tqdm import tqdm
 
 from create_data import DataProcessor, Record
+
+def collate_fn(data):
+    x, y_in, y_out = zip(*data)
+    
+    # Dynamic padding for variable-length audio
+    max_len = max([x_i.shape[1] for x_i in x])
+    x_padded = []
+    for x_i in x:
+        pad_amount = max_len - x_i.shape[1]
+        x_padded.append(torch.nn.functional.pad(x_i, (0, pad_amount)))
+    x = torch.stack(x_padded)
+    
+    y_in = pad_sequence(y_in, batch_first=True, padding_value=0)
+    y_out = pad_sequence(y_out, batch_first=True, padding_value=-100)
+    
+    return x, y_in, y_out
+
+class CachedDataset(Dataset):
+    """Simple in-memory cache wrapper for any dataset"""
+    def __init__(self, dataset):
+        self.dataset = dataset
+        self.cache = [None] * len(dataset)
+        
+    def __len__(self):
+        return len(self.dataset)
+        
+    def __getitem__(self, index):
+        if self.cache[index] is None:
+            self.cache[index] = self.dataset[index]
+        return self.cache[index]
 
 class AudioDataset(Dataset):
     def __init__(
@@ -161,35 +191,20 @@ class AudioDataset(Dataset):
             torch.tensor(decoder_output, dtype=torch.long),
         )
 
-def collate_fn(data):
-    x, y_in, y_out = zip(*data)
-    
-    # Dynamic padding for variable-length audio
-    max_len = max([x_i.shape[1] for x_i in x])
-    x_padded = []
-    for x_i in x:
-        pad_amount = max_len - x_i.shape[1]
-        x_padded.append(torch.nn.functional.pad(x_i, (0, pad_amount)))
-    x = torch.stack(x_padded)
-    
-    y_in = pad_sequence(y_in, batch_first=True, padding_value=0)
-    y_out = pad_sequence(y_out, batch_first=True, padding_value=-100)
-    
-    return x, y_in, y_out
-
-def get_dataloader(
+# Changed function name from get_dataloader to get_dataset
+def get_dataset(
     json: str,
     tokenizer: Tokenizer,
-    batch_size: int = 1,
     fp16: bool = True,
     no_timestamps_training: bool = False,
     max_prompt_length: int = 223,
     prompt_use_rate: float = 0.5,
     no_timestamps_rate: float = 0.5,
-    shuffle: bool = True,
-) -> DataLoader:
+) -> Dataset:
     records = DataProcessor.read_records(json)
-    dataset = AudioDataset(
+
+    # Create base dataset
+    base_dataset = AudioDataset(
         records,
         tokenizer,
         fp16=fp16,
@@ -198,11 +213,6 @@ def get_dataloader(
         prompt_use_rate=prompt_use_rate,
         no_timestamps_rate=no_timestamps_rate,
     )
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        num_workers=0,  # Set to 0 for Windows compatibility
-        pin_memory=True,
-        collate_fn=collate_fn,
-    )
+    
+    # Wrap with caching
+    return CachedDataset(base_dataset)

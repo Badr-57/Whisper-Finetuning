@@ -14,6 +14,8 @@ from whisper.audio import load_audio, log_mel_spectrogram
 from whisper.tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
 from whisper.utils import format_timestamp
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def get_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Create a jsonl file to be used for fine-tuning a Whisper model"
@@ -466,50 +468,42 @@ class DataProcessor:
         from whisper.audio import log_mel_spectrogram
         import numpy as np
         
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
         audio_start_idx = int(segment_start * SAMPLE_RATE / 1000)
         segment_end_idx = min(audio_start_idx + DURATION_IN_SAMPLES, audio.size(0))
         
-        # Skip empty segments
         if segment_end_idx <= audio_start_idx:
             return None
         
-        # Extract the audio segment
-        segment_audio = audio[audio_start_idx:segment_end_idx]
+        segment_audio = audio[audio_start_idx:segment_end_idx].to(device)
         
-        # Skip very short segments
-        if len(segment_audio) < 400:  # At least 25ms of audio (400 samples at 16kHz)
-            return None
-        
-        # Convert to numpy array of float32
-        segment_audio_np = segment_audio.numpy().astype(np.float32)
-        
-        # Compute mel spectrogram - returns a tensor
-        try:
-            mel = log_mel_spectrogram(segment_audio_np, n_mels=128)
-        except Exception as e:
-            tqdm.write(f"Failed to compute spectrogram: {str(e)}")
-            return None
-        
-        # Skip if we get an empty spectrogram
-        if mel.numel() == 0:
+        if len(segment_audio) < 400:
             return None
             
-        # Custom padding implementation
-        if mel.shape[1] < N_FRAMES:
-            # Pad with zeros
-            padded = torch.zeros((mel.shape[0], N_FRAMES), 
-                                dtype=mel.dtype, 
-                                device=mel.device)
-            padded[:, :mel.shape[1]] = mel
-            mel = padded
-        elif mel.shape[1] > N_FRAMES:
-            # Trim to required length
-            mel = mel[:, :N_FRAMES]
-        
-        # Save the tensor
-        segment_features_path = str((dump_dir / f"{segment_start}.pt").absolute())
-        torch.save(mel, segment_features_path)
-        return segment_features_path
+        try:
+            # GPU-accelerated spectrogram
+            segment_audio_np = segment_audio.cpu().numpy().astype(np.float32)
+            mel = log_mel_spectrogram(segment_audio_np).to(device)
+            
+            # Dynamic padding
+            if mel.shape[1] < N_FRAMES:
+                padded = torch.zeros((mel.shape[0], N_FRAMES), 
+                                    dtype=mel.dtype, 
+                                    device=device)
+                padded[:, :mel.shape[1]] = mel
+                mel = padded
+            elif mel.shape[1] > N_FRAMES:
+                mel = mel[:, :N_FRAMES]
+                
+            # Save directly from GPU
+            segment_features_path = dump_dir / f"{segment_start}.pt"
+            torch.save(mel.cpu(), segment_features_path)  # Save to CPU for later loading
+            return str(segment_features_path.absolute())
+            
+        except Exception as e:
+            tqdm.write(f"Feature extraction failed: {str(e)}")
+            return None
     
     def _is_valid_utterances(self, utterances: List[Utterance], segment_start: int) -> bool:
         if len(utterances) == 0:
