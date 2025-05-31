@@ -5,4 +5,3 @@ python transcribe.py \
     --batch-size 128 \
     --precision fp16 \
     --suppress-silence \
-    --beam-size 5
