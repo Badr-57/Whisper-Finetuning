@@ -10,8 +10,7 @@ from typing import Deque, List, Optional, Union
 import torch
 import torchaudio
 from tqdm import tqdm
-from whisper.audio import load_audio
-from whisper.audio import log_mel_spectrogram 
+from whisper.audio import load_audio, log_mel_spectrogram
 from whisper.tokenizer import LANGUAGES, TO_LANGUAGE_CODE, get_tokenizer
 from whisper.utils import format_timestamp
 
@@ -354,8 +353,7 @@ class DataProcessor:
     def _create_records_with_timestamps(
         self, utterances: List[Utterance], audio_path: Path
     ) -> List[Record]:
-        with torch.inference_mode():
-            audio = torch.tensor(load_audio(audio_path))
+        audio = torch.tensor(load_audio(audio_path))
         dump_dir = Path(self.dump_dir) / audio_path.stem
         dump_dir.mkdir(parents=True, exist_ok=True)
         records = []
@@ -467,7 +465,7 @@ class DataProcessor:
         return records
     
     def _save_segment_features(self, audio: torch.Tensor, segment_start: int, dump_dir: Path) -> Union[str, None]:
-        from whisper import log_mel_spectrogram
+        from whisper.audio import log_mel_spectrogram
         import numpy as np
         
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -484,8 +482,9 @@ class DataProcessor:
             return None
             
         try:
+            # GPU-accelerated spectrogram
             segment_audio_np = segment_audio.cpu().numpy().astype(np.float32)
-            mel = log_mel_spectrogram(segment_audio_np, n_mels=128, padding=N_FRAMES if segment_audio_np.size > 0 else 0)
+            mel = log_mel_spectrogram(segment_audio_np, n_mels=128, padding=N_FRAMES if segment_audio_np.size > 0 else 0).to(device)
             
             # Dynamic padding
             if mel.shape[1] < N_FRAMES:
@@ -557,7 +556,7 @@ class DataProcessor:
                 f"{format_timestamp((segment_start + DURATION) / 1000)}) of {audio_path}"
             )
 
-        time_in_segment = max(0, min(DURATION, time - segment_start))
+        time_in_segment = time - segment_start
         nearest_timestamp = round(time_in_segment / self.timestamp_resolution) * self.timestamp_resolution
         return f"<|{nearest_timestamp / 1000:.2f}|>"
 
